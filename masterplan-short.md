@@ -24,6 +24,9 @@ Rules governing how work on this project gets done:
   matplotlib. One DX cluster via telnet, CW-only (server-enforced).
 - Band scope: static frequency strip (no time axis), center ± BW,
   1/5/10/30-min window, alpha-fade aging, click-to-copy callsign.
+- Layout: vertical bandmap — RBN/cluster lane left (tick + label), POTA lane
+  right (plain text) — with Band/Bandwidth/Window controls embedded in the
+  main window, not a separate filter popup.
 - Filtering: server-side via CC Cluster `SET/FILTER` — country, US state,
   band. Dedup: suppress same call+band within N min (cluster spots only).
 - POTA lane: public API (`api.pota.app`, no auth), CW-only, filtered to the
@@ -42,7 +45,9 @@ Rules governing how work on this project gets done:
 - Spot store: `BandScope._spots` keyed `(dx_call, band, feed)` — one entry
   per station per feed, so cluster and POTA never evict each other.
   Two independent render lanes, same navy color/fade curve, each with its
-  own `_declutter_y()` pass.
+  own `_declutter_y()` pass. Decluttering must clip/constrain placement to
+  the visible frequency window (ylim) — compress spacing or drop overflow
+  rather than letting labels render outside the plotted frame.
 - Modules: `main.py` (UI/poll loop) · `cluster.py` (telnet, parser, `Spot`)
   · `pota_client.py` (API worker) · `bandscope.py` (scope widget) ·
   `filter_panel.py` · `filters.py` (dedup, DXCC lookup) · `config.py` ·
