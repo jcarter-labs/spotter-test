@@ -1,7 +1,9 @@
-"""Right-side pulldown control panel: Band, Bandwidth, Window.
+"""Right-side control panel: Frequency (MHz) entry + Set, Bandwidth, Window.
 
 Embedded directly in the main window rather than a separate popup, per the
-requested layout.
+requested layout. Frequency is typed directly (MHz) rather than chosen from
+a band-name dropdown; the band name needed for the server-side filter is
+derived from the typed frequency via cluster.detect_band().
 """
 from __future__ import annotations
 
@@ -9,51 +11,36 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
-from cluster import ALL_BANDS
-
-# Station has no 160m/80m capability - excluded from the selectable list.
-SELECTABLE_BANDS = [b for b in ALL_BANDS if b not in ("160m", "80m")]
-
 BANDWIDTH_OPTIONS_KHZ = [10, 20, 50, 100]
 WINDOW_OPTIONS_MIN = [1, 5, 10, 30]
-
-# Typical CW-segment center frequency per band, kHz.
-BAND_CENTER_KHZ = {
-    "60m": 5357.0,
-    "40m": 7025.0,
-    "30m": 10110.0,
-    "20m": 14025.0,
-    "17m": 18080.0,
-    "15m": 21025.0,
-    "12m": 24900.0,
-    "10m": 28025.0,
-    "6m": 50100.0,
-}
 
 
 class ControlPanel(tk.Frame):
     def __init__(
         self,
         master,
-        selected_band: str,
+        center_khz: float,
         bandwidth_khz: float,
         window_minutes: float,
-        on_change: Callable[[str, float, float], None],
+        on_change: Callable[[float, float, float], None],
         **kwargs,
     ):
         super().__init__(master, **kwargs)
         self._on_change = on_change
 
-        self._band_var = tk.StringVar(value=selected_band)
+        self._freq_var = tk.StringVar(value=f"{center_khz / 1000:.3f}")
         self._bandwidth_var = tk.StringVar(value=str(int(bandwidth_khz)))
         self._window_var = tk.StringVar(value=str(int(window_minutes)))
 
-        tk.Label(self, text="Band").pack(anchor="w")
-        band_menu = ttk.Combobox(
-            self, textvariable=self._band_var, values=SELECTABLE_BANDS, state="readonly"
+        tk.Label(self, text="Frequency (MHz)").pack(anchor="w")
+        freq_row = tk.Frame(self)
+        freq_row.pack(fill=tk.X)
+        freq_entry = ttk.Entry(freq_row, textvariable=self._freq_var, width=10)
+        freq_entry.pack(side=tk.LEFT)
+        freq_entry.bind("<Return>", self._changed)
+        ttk.Button(freq_row, text="Set", command=self._changed).pack(
+            side=tk.LEFT, padx=(4, 0)
         )
-        band_menu.pack(fill=tk.X)
-        band_menu.bind("<<ComboboxSelected>>", self._changed)
 
         tk.Label(self, text="Bandwidth (kHz)").pack(anchor="w", pady=(10, 0))
         bw_menu = ttk.Combobox(
@@ -76,7 +63,10 @@ class ControlPanel(tk.Frame):
         window_menu.bind("<<ComboboxSelected>>", self._changed)
 
     def _changed(self, _event=None) -> None:
-        band = self._band_var.get()
+        try:
+            center_khz = float(self._freq_var.get()) * 1000
+        except ValueError:
+            return
         bandwidth_khz = float(self._bandwidth_var.get())
         window_minutes = float(self._window_var.get())
-        self._on_change(band, bandwidth_khz, window_minutes)
+        self._on_change(center_khz, bandwidth_khz, window_minutes)

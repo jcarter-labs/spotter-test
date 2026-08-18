@@ -56,20 +56,65 @@ class TestIsotonicNondecreasing(unittest.TestCase):
 
 class TestDeclutterY(unittest.TestCase):
     def test_widely_spaced_labels_unchanged(self):
-        result = _declutter_y([100.0, 200.0, 300.0], row_height=1.0)
+        result = _declutter_y([100.0, 200.0, 300.0], row_height=1.0, lo=0.0, hi=1000.0)
         self.assertEqual(result, [100.0, 200.0, 300.0])
 
     def test_overlapping_labels_spread_apart(self):
-        result = _declutter_y([100.0, 100.1, 100.2], row_height=1.0)
+        result = _declutter_y([100.0, 100.1, 100.2], row_height=1.0, lo=0.0, hi=1000.0)
         ordered = sorted(result)
         for a, b in zip(ordered, ordered[1:]):
             self.assertGreaterEqual(b - a, 1.0 - 1e-9)
 
     def test_zero_row_height_returns_natural(self):
-        self.assertEqual(_declutter_y([5.0, 1.0], row_height=0), [5.0, 1.0])
+        result = _declutter_y([5.0, 1.0], row_height=0, lo=0.0, hi=10.0)
+        self.assertEqual(result, [5.0, 1.0])
 
     def test_empty(self):
-        self.assertEqual(_declutter_y([], row_height=1.0), [])
+        self.assertEqual(_declutter_y([], row_height=1.0, lo=0.0, hi=10.0), [])
+
+    def test_never_escapes_window_when_overcrowded(self):
+        # 50 labels wanting 1 kHz of row each, but only a 10 kHz-wide window
+        # - far more demand than fits. Every placed position must stay
+        # inside [lo, hi] rather than spilling past the frame.
+        natural = [float(i) for i in range(50)]
+        result = _declutter_y(natural, row_height=1.0, lo=0.0, hi=10.0)
+        self.assertEqual(len(result), 50)
+        for p in result:
+            self.assertGreaterEqual(p, 0.0)
+            self.assertLessEqual(p, 10.0)
+
+    def test_overcrowded_preserves_relative_order(self):
+        natural = [5.0, 1.0, 3.0]
+        result = _declutter_y(natural, row_height=100.0, lo=0.0, hi=10.0)
+        self.assertLess(result[1], result[2])  # 1.0 < 3.0
+        self.assertLess(result[2], result[0])  # 3.0 < 5.0
+
+    def test_single_item_outside_window_gets_clamped(self):
+        result = _declutter_y([9999.0], row_height=1.0, lo=0.0, hi=10.0)
+        self.assertEqual(result, [10.0])
+
+    def test_tight_cluster_does_not_drag_in_separated_points(self):
+        # Regression: 6 points crammed within 0.6 kHz near the bottom, plus
+        # 5 points already comfortably spread out (8 kHz apart, well over
+        # row_height) higher up. Total demand (10 kHz) fits easily in the
+        # 50 kHz window, so nothing here should need compression - but the
+        # old pre-shrink-row_height approach forced them all into one PAVA
+        # pool, flinging one label (the last of the tight cluster) up near
+        # the top while its true neighbors stayed at the bottom.
+        natural = [
+            14000.1, 14000.2, 14000.3, 14000.4, 14000.5, 14000.6,
+            14008.0, 14016.0, 14022.0, 14030.0, 14040.0,
+        ]
+        result = _declutter_y(natural, row_height=1.0, lo=14000.0, hi=14050.0)
+        # The tight cluster (first 6) must stay tight - no member should
+        # land more than a few kHz from its natural position.
+        for natural_y, placed_y in zip(natural[:6], result[:6]):
+            self.assertLess(abs(placed_y - natural_y), 10.0)
+        # And the whole result must stay ordered and within the window.
+        self.assertEqual(result, sorted(result))
+        for p in result:
+            self.assertGreaterEqual(p, 14000.0)
+            self.assertLessEqual(p, 14050.0)
 
 
 @unittest.skipUnless(TK_AVAILABLE, "no display available for Tk widget test")
@@ -114,6 +159,21 @@ class TestBandMapStorage(unittest.TestCase):
     def test_get_window_khz(self):
         bandmap = BandMap(self.root, center_khz=14025.0, bandwidth_khz=50.0, window_minutes=10)
         self.assertEqual(bandmap.get_window_khz(), (14025.0, 50.0))
+        bandmap.destroy()
+
+    def test_count_by_feed_excludes_out_of_window_spots(self):
+        # Regression: a spot can be on-band (server-side filter passes it,
+        # e.g. anywhere in 20m) but far outside this particular slice of
+        # it - it must not count as "shown" nor be handed to decluttering.
+        bandmap = BandMap(self.root, center_khz=14025.0, bandwidth_khz=50.0, window_minutes=10)
+        bandmap.add_spots(
+            [
+                self._spot("N6OVP", 14047.1, "DXCLUSTER"),  # in window
+                self._spot("HI5PPH", 14270.0, "DXCLUSTER"),  # on-band, off-window
+            ]
+        )
+        self.assertEqual(len(bandmap._spots), 2)  # both stored
+        self.assertEqual(bandmap.count_by_feed(), {"DXCLUSTER": 1})  # only 1 shown
         bandmap.destroy()
 
 

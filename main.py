@@ -1,8 +1,8 @@
 """DX Spotter - launch with `py main.py`.
 
 Vertical bandmap: RBN/DX-cluster spots on the left (tick + label), POTA
-spots on the right (plain text), Band/Bandwidth/Window pulldowns on the
-far right. CW-only, server-side band filtering via ve7cc.net CC Cluster.
+spots on the right (plain text), Frequency/Bandwidth/Window controls on
+the far right. CW-only, server-side band filtering via ve7cc.net CC Cluster.
 """
 from __future__ import annotations
 
@@ -11,14 +11,16 @@ import time
 import tkinter as tk
 
 from bandmap import BandMap
-from cluster import ClusterConnection
+from cluster import ClusterConnection, detect_band
 from config import Config
-from controls import BAND_CENTER_KHZ, ControlPanel
+from controls import ControlPanel
 from filters import DedupCache
 from pota_client import PotaConnection
 from scope_utils import drain_queue
 
 POLL_MS = 200
+_DOT_CONNECTED = "#0a8a0a"
+_DOT_OTHER = "#b00000"
 
 
 class SpotterApp(tk.Tk):
@@ -40,6 +42,32 @@ class SpotterApp(tk.Tk):
         self._poll()
 
     def _build_ui(self) -> None:
+        # Status packed first (and BOTTOM) so it reserves its space before
+        # the bandmap/controls row expands to fill what's left.
+        status = tk.Frame(self, padx=4, pady=2)
+        status.pack(side=tk.BOTTOM, fill=tk.X)
+
+        cluster_row = tk.Frame(status)
+        cluster_row.pack(fill=tk.X, anchor="w")
+        self._cluster_dot = tk.Label(
+            cluster_row, text="●", fg=_DOT_OTHER, font=("", 9)
+        )
+        self._cluster_dot.pack(side=tk.LEFT)
+        self._cluster_var = tk.StringVar(value="Cluster: connecting")
+        tk.Label(cluster_row, textvariable=self._cluster_var, anchor="w").pack(
+            side=tk.LEFT
+        )
+
+        self._pota_var = tk.StringVar(value="POTA: connecting")
+        tk.Label(status, textvariable=self._pota_var, anchor="w").pack(
+            fill=tk.X, anchor="w"
+        )
+
+        self._shown_var = tk.StringVar(value="Shown: RBN 0 · POTA 0")
+        tk.Label(status, textvariable=self._shown_var, anchor="w").pack(
+            fill=tk.X, anchor="w"
+        )
+
         container = tk.Frame(self)
         container.pack(fill=tk.BOTH, expand=True)
 
@@ -53,15 +81,12 @@ class SpotterApp(tk.Tk):
 
         self._controls = ControlPanel(
             container,
-            selected_band=self._config.get("selected_band", "20m"),
+            center_khz=self._config.get("center_khz", 14025.0),
             bandwidth_khz=self._config.get("bandwidth_khz", 50.0),
             window_minutes=self._config.get("window_minutes", 10),
             on_change=self._on_controls_changed,
         )
         self._controls.pack(side=tk.RIGHT, fill=tk.Y, padx=8, pady=8)
-
-        self._status_var = tk.StringVar(value="Connecting...")
-        tk.Label(self, textvariable=self._status_var, anchor="w").pack(fill=tk.X)
 
     def _connect_cluster(self) -> None:
         self._conn = ClusterConnection(
@@ -78,8 +103,12 @@ class SpotterApp(tk.Tk):
         self._pota = PotaConnection(self._pota_queue, self._bandmap.get_window_khz)
         self._pota.start()
 
-    def _on_controls_changed(self, band: str, bandwidth_khz: float, window_minutes: float) -> None:
-        center_khz = BAND_CENTER_KHZ.get(band, self._config.get("center_khz", 14025.0))
+    def _on_controls_changed(
+        self, center_khz: float, bandwidth_khz: float, window_minutes: float
+    ) -> None:
+        band = detect_band(center_khz)
+        if band is None:
+            return  # frequency doesn't fall in a known band - ignore
         self._bandmap.set_window(
             center_khz=center_khz,
             bandwidth_khz=bandwidth_khz,
@@ -113,22 +142,21 @@ class SpotterApp(tk.Tk):
         conn = self._conn
         pota = self._pota
 
-        cluster_bit = f"Cluster: {conn.status}"
-        if conn.reconnect_count:
-            cluster_bit += f" (reconnects: {conn.reconnect_count})"
-        cluster_bit += f" rx={conn.received_count}"
-        if conn.offband_count:
-            cluster_bit += f" off-band={conn.offband_count}"
+        self._cluster_dot.config(
+            fg=_DOT_CONNECTED if conn.status == "connected" else _DOT_OTHER
+        )
+        self._cluster_var.set(f"Cluster: {conn.status}")
 
-        pota_bit = f"POTA: {pota.status}"
         if pota.last_poll_monotonic is not None:
             age_s = int(time.monotonic() - pota.last_poll_monotonic)
-            pota_bit += f" last poll {age_s}s ago, fetched={pota.last_fetch_count} in-window={pota.last_queued_count}"
+            self._pota_var.set(f"POTA: last poll {age_s}s ago")
+        else:
+            self._pota_var.set(f"POTA: {pota.status}")
 
         shown = self._bandmap.count_by_feed()
-        shown_bit = f"Shown - RBN: {shown.get('DXCLUSTER', 0)} POTA: {shown.get('POTA', 0)}"
-
-        self._status_var.set(f"{cluster_bit} | {pota_bit} | {shown_bit}")
+        self._shown_var.set(
+            f"Shown: RBN {shown.get('DXCLUSTER', 0)} · POTA {shown.get('POTA', 0)}"
+        )
 
     def _on_close(self) -> None:
         self._conn.stop()
