@@ -27,6 +27,14 @@ Rules governing how work on this project gets done:
 - Layout: vertical bandmap — RBN/cluster lane left (tick + label), POTA lane
   right (plain text) — with Band/Bandwidth/Window controls embedded in the
   main window, not a separate filter popup.
+- Frame: no boxed border around the scope — left frequency spine + tick
+  labels only, transparent plot background.
+- Status: three stacked lines, not one — `● Cluster: <state>` (dot color =
+  connection state), `POTA: last poll Xs ago`, `Shown: RBN N · POTA N` — no
+  other color coding on the panel.
+- Band control: numeric MHz entry + Set button, not a band-name dropdown —
+  typed frequency sets `center_khz` directly; band name (for the server-side
+  `DXBM/REJECT` filter) is derived via `detect_band()`, not chosen directly.
 - Filtering: server-side via CC Cluster `SET/FILTER` — country, US state,
   band. Dedup: suppress same call+band within N min (cluster spots only).
 - POTA lane: public API (`api.pota.app`, no auth), CW-only, filtered to the
