@@ -41,6 +41,18 @@ Rules governing how work on this project gets done:
   `DXBM/REJECT` filter) is derived via `detect_band()`, not chosen directly.
 - Filtering: server-side via CC Cluster `SET/FILTER` — country, US state,
   band. Dedup: suppress same call+band within N min (cluster spots only).
+- Spotter tier: radio group (Local/Regional) below Window(min). Local = 3
+  vetted spotters, Regional = superset of 13 (matches
+  `nc7j_spotter_groups.md`). CC Cluster has no exact spotter-callsign
+  filter — server-side `DOC`/`DOS` narrows by state as a coarse pre-filter
+  only; exact matching happens client-side before dedup.
+- Bandwidth options: 10/20/40/50/80/100 kHz.
+- Protocol fact: VE7CC's CC Cluster marks skimmer-originated spots with a
+  **literal `-#` character** in the spotter field (e.g. `DX de WA7LNW-#:
+  ...`), not a resolved numeric SSID — confirmed via raw byte capture. This
+  is not the AR-Cluster wildcard-filter meaning of `-#`; it's literal live
+  data on this server. Spotter-matching logic must treat `#` as a valid
+  SSID-suffix, not just digits.
 - POTA lane: public API (`api.pota.app`, no auth), CW-only, filtered to the
   scope's live window, independent right-edge lane (no tick/leader, no
   color distinction, no dedup), own thread/queue, 60s poll.
@@ -64,9 +76,14 @@ Rules governing how work on this project gets done:
   · `pota_client.py` (API worker) · `bandscope.py` (scope widget) ·
   `filter_panel.py` · `filters.py` (dedup, DXCC lookup) · `config.py` ·
   `scope_utils.py`.
-- Known loose ends: no `requirements.txt`; POTA status indicator is set
-  once at startup, doesn't reflect live health; `main.py` wiring has no
-  automated test (manual smoke-test only); backoff timing unasserted.
+- Filter-setup dispatch: `ClusterConnection.set_band()`/`set_spotter_tier()`
+  are called from the Tk UI thread and must dispatch the actual command
+  sends asynchronously (background thread) — calling `_send_filter_setup()`
+  inline blocks for several seconds (waits between ~7 commands), freezing
+  the UI, which reads as a hang/crash.
+- Known loose ends: POTA status indicator is set once at startup, doesn't
+  reflect live health; `main.py` wiring has no automated test (manual
+  smoke-test only); backoff timing unasserted.
 
 ## Tasks
 
