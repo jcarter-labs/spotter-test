@@ -17,6 +17,10 @@ Rules governing how work on this project gets done:
   present aspirational behavior as working.
 - Every new external-server interaction needs a one-line runnable diagnostic
   test before it's considered done.
+- Ask, don't assume. When reproducing a reported issue needs state not
+  already given (a setting, a prior step), ask before building a diagnostic
+  around a guess — a diagnostic proves only the scenario it assumed, not
+  the one reported.
 
 ## Spec
 
