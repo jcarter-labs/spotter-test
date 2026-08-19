@@ -1,4 +1,5 @@
-"""Right-side control panel: Frequency (MHz) entry + Set, Bandwidth, Window.
+"""Right-side control panel: Frequency (MHz) entry + Set, Bandwidth, Window,
+Spotter tier.
 
 Embedded directly in the main window rather than a separate popup, per the
 requested layout. Frequency is typed directly (MHz) rather than chosen from
@@ -11,8 +12,9 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
-BANDWIDTH_OPTIONS_KHZ = [10, 20, 50, 100]
+BANDWIDTH_OPTIONS_KHZ = [10, 20, 40, 50, 80, 100]
 WINDOW_OPTIONS_MIN = [1, 5, 10, 30]
+SPOTTER_TIERS = [("Local", "local"), ("Regional", "regional")]
 
 
 class ControlPanel(tk.Frame):
@@ -22,7 +24,8 @@ class ControlPanel(tk.Frame):
         center_khz: float,
         bandwidth_khz: float,
         window_minutes: float,
-        on_change: Callable[[float, float, float], None],
+        spotter_tier: str,
+        on_change: Callable[[float, float, float, str], None],
         **kwargs,
     ):
         super().__init__(master, **kwargs)
@@ -31,6 +34,7 @@ class ControlPanel(tk.Frame):
         self._freq_var = tk.StringVar(value=f"{center_khz / 1000:.3f}")
         self._bandwidth_var = tk.StringVar(value=str(int(bandwidth_khz)))
         self._window_var = tk.StringVar(value=str(int(window_minutes)))
+        self._tier_var = tk.StringVar(value=spotter_tier)
 
         tk.Label(self, text="Frequency (MHz)").pack(anchor="w")
         freq_row = tk.Frame(self)
@@ -62,6 +66,16 @@ class ControlPanel(tk.Frame):
         window_menu.pack(fill=tk.X)
         window_menu.bind("<<ComboboxSelected>>", self._changed)
 
+        tk.Label(self, text="Spotter").pack(anchor="w", pady=(10, 0))
+        for label, value in SPOTTER_TIERS:
+            tk.Radiobutton(
+                self,
+                text=label,
+                variable=self._tier_var,
+                value=value,
+                command=self._changed,
+            ).pack(anchor="w")
+
     def _changed(self, _event=None) -> None:
         try:
             center_khz = float(self._freq_var.get()) * 1000
@@ -69,4 +83,5 @@ class ControlPanel(tk.Frame):
             return
         bandwidth_khz = float(self._bandwidth_var.get())
         window_minutes = float(self._window_var.get())
-        self._on_change(center_khz, bandwidth_khz, window_minutes)
+        spotter_tier = self._tier_var.get()
+        self._on_change(center_khz, bandwidth_khz, window_minutes, spotter_tier)

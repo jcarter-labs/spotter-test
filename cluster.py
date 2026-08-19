@@ -94,6 +94,45 @@ def band_filter_commands(selected_band: str) -> list[str]:
     return [f"SET/FILTER DXBM/REJECT {','.join(reject)}"]
 
 
+# Vetted spotter tiers, from Radio/Projects/spot_filt/nc7j_spotter_groups.md.
+# "regional" is a superset of "local" (matches spot_filter.py's own tiering).
+# CC Cluster has no exact spotter-callsign filter (SET/SPOTTER, SET/ORIGIN
+# are both confirmed invalid) - DOC/DOS (country/state) is the finest
+# server-side granularity available, so this is a coarse pre-filter only.
+# Exact matching happens client-side (see filters.spotter_matches_tier).
+SPOTTER_TIER_CALLS: dict[str, frozenset[str]] = {
+    "local": frozenset({"W6YX", "AK6RI-1", "N6TV"}),
+    "regional": frozenset(
+        {
+            "W6YX", "AK6RI-1", "N6TV",
+            "K6FOD", "WA7LNW", "ND7K", "K7CO", "NG7M",
+            "N7VVX", "N7TUG", "KD7EFG", "KW7MM", "KW7MM-2",
+        }
+    ),
+}
+
+# States derived from each tier's spotters' QRZ/grid locations - all in CA
+# for local; regional adds AZ (KW7MM, KW7MM-2), UT (KD7EFG, NG7M), ID
+# (K7CO, N7VVX), WA (N7TUG). Confirmed via QRZ lookup for the three that
+# had no grid on record (KD7EFG, KW7MM, KW7MM-2).
+SPOTTER_TIER_STATES: dict[str, list[str]] = {
+    "local": ["CA"],
+    "regional": ["CA", "AZ", "UT", "ID", "WA"],
+}
+
+
+def spotter_tier_filter_commands(tier: str) -> list[str]:
+    """Coarse server-side pre-filter for a spotter tier: US spotters in the
+    tier's states. Narrows traffic only - does not replace exact matching."""
+    if tier not in SPOTTER_TIER_STATES:
+        raise ValueError(f"unknown spotter tier: {tier!r}")
+    states = ",".join(SPOTTER_TIER_STATES[tier])
+    return [
+        "SET/FILTER DOC/PASS K",
+        f"SET/FILTER DOS/PASS {states}",
+    ]
+
+
 @dataclasses.dataclass
 class Spot:
     dx_call: str
@@ -135,6 +174,7 @@ class ClusterConnection:
         spot_queue: "queue.Queue[Spot]",
         text_queue: "Optional[queue.Queue[str]]" = None,
         selected_band: str = "20m",
+        selected_tier: str = "local",
     ):
         self._host = host
         self._port = port
@@ -142,6 +182,7 @@ class ClusterConnection:
         self._spot_queue = spot_queue
         self._text_queue = text_queue
         self._selected_band = selected_band
+        self._selected_tier = selected_tier
         self._stop_event = threading.Event()
         self._sock_lock = threading.Lock()
         self._sock: Optional[socket.socket] = None
@@ -176,7 +217,20 @@ class ClusterConnection:
         self._selected_band = band
         self.received_count = 0
         self.offband_count = 0
-        self._send_filter_setup()
+        self._send_filter_setup_async()
+
+    def set_spotter_tier(self, tier: str) -> None:
+        self._selected_tier = tier
+        self._send_filter_setup_async()
+
+    def _send_filter_setup_async(self) -> None:
+        """set_band()/set_spotter_tier() are called from the Tk UI thread.
+        _send_filter_setup() blocks for ~2s (FILTER_CMD_WAIT_S between each
+        of ~7 commands) - running it inline froze the whole UI for the
+        duration. Dispatch it to a short-lived background thread instead;
+        send_command() is already lock-protected per-command, so concurrent
+        setup calls (e.g. rapid clicks) can interleave commands safely."""
+        threading.Thread(target=self._send_filter_setup, daemon=True).start()
 
     def send_command(self, cmd: str) -> None:
         with self._sock_lock:
@@ -192,6 +246,7 @@ class ClusterConnection:
         commands = ["UNSET/FILTER"]
         commands.extend(mode_disable_commands(["CW"]))
         commands.extend(band_filter_commands(self._selected_band))
+        commands.extend(spotter_tier_filter_commands(self._selected_tier))
         for cmd in commands:
             self.send_command(cmd)
             self._stop_event.wait(FILTER_CMD_WAIT_S)

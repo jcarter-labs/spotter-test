@@ -20,6 +20,7 @@ DEFAULTS = {
     "center_khz": 14025.0,
     "bandwidth_khz": 50.0,
     "selected_band": "20m",
+    "spotter_tier": "local",
 }
 
 

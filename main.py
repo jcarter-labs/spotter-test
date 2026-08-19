@@ -14,7 +14,7 @@ from bandmap import BandMap
 from cluster import ClusterConnection, detect_band
 from config import Config
 from controls import ControlPanel
-from filters import DedupCache
+from filters import DedupCache, spotter_matches_tier
 from pota_client import PotaConnection
 from scope_utils import drain_queue
 
@@ -29,6 +29,8 @@ class SpotterApp(tk.Tk):
         self.title("DX Spotter")
 
         self._config = Config().load()
+        self._spotter_tier = self._config.get("spotter_tier", "local")
+        self._band = self._config.get("selected_band", "20m")
         self._spot_queue: "queue.Queue" = queue.Queue()
         self._text_queue: "queue.Queue" = queue.Queue()
         self._pota_queue: "queue.Queue" = queue.Queue()
@@ -84,6 +86,7 @@ class SpotterApp(tk.Tk):
             center_khz=self._config.get("center_khz", 14025.0),
             bandwidth_khz=self._config.get("bandwidth_khz", 50.0),
             window_minutes=self._config.get("window_minutes", 10),
+            spotter_tier=self._spotter_tier,
             on_change=self._on_controls_changed,
         )
         self._controls.pack(side=tk.RIGHT, fill=tk.Y, padx=8, pady=8)
@@ -96,6 +99,7 @@ class SpotterApp(tk.Tk):
             spot_queue=self._spot_queue,
             text_queue=self._text_queue,
             selected_band=self._config.get("selected_band", "20m"),
+            selected_tier=self._spotter_tier,
         )
         self._conn.start()
 
@@ -104,7 +108,11 @@ class SpotterApp(tk.Tk):
         self._pota.start()
 
     def _on_controls_changed(
-        self, center_khz: float, bandwidth_khz: float, window_minutes: float
+        self,
+        center_khz: float,
+        bandwidth_khz: float,
+        window_minutes: float,
+        spotter_tier: str,
     ) -> None:
         band = detect_band(center_khz)
         if band is None:
@@ -114,15 +122,23 @@ class SpotterApp(tk.Tk):
             bandwidth_khz=bandwidth_khz,
             window_minutes=window_minutes,
         )
-        self._conn.set_band(band)
+        if band != self._band:
+            self._conn.set_band(band)
+            self._band = band
+        if spotter_tier != self._spotter_tier:
+            self._conn.set_spotter_tier(spotter_tier)
+            self._spotter_tier = spotter_tier
         self._config.set("selected_band", band)
         self._config.set("center_khz", center_khz)
         self._config.set("bandwidth_khz", bandwidth_khz)
         self._config.set("window_minutes", window_minutes)
+        self._config.set("spotter_tier", spotter_tier)
 
     def _poll(self) -> None:
         new_spots = []
         for spot in drain_queue(self._spot_queue):
+            if not spotter_matches_tier(spot.spotter, self._spotter_tier):
+                continue
             if not self._dedup.is_dup(spot):
                 self._dedup.record(spot)
                 new_spots.append(spot)

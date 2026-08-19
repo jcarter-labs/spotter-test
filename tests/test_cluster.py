@@ -1,17 +1,20 @@
 import queue
 import sys
+import time
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cluster import (
+    ClusterConnection,
     Spot,
     band_filter_commands,
     detect_band,
     detect_mode,
     mode_disable_commands,
     parse_spot,
+    spotter_tier_filter_commands,
 )
 
 
@@ -115,6 +118,49 @@ class TestBandFilterCommands(unittest.TestCase):
     def test_unknown_band_raises(self):
         with self.assertRaises(ValueError):
             band_filter_commands("11m")
+
+
+class TestSpotterTierFilterCommands(unittest.TestCase):
+    def test_local_passes_only_ca(self):
+        cmds = spotter_tier_filter_commands("local")
+        self.assertIn("SET/FILTER DOC/PASS K", cmds)
+        self.assertIn("SET/FILTER DOS/PASS CA", cmds)
+
+    def test_regional_passes_all_five_states(self):
+        cmds = spotter_tier_filter_commands("regional")
+        dos_cmd = next(c for c in cmds if c.startswith("SET/FILTER DOS/PASS"))
+        for state in ("CA", "AZ", "UT", "ID", "WA"):
+            self.assertIn(state, dos_cmd)
+
+    def test_unknown_tier_raises(self):
+        with self.assertRaises(ValueError):
+            spotter_tier_filter_commands("national")
+
+
+class TestAsyncFilterDispatch(unittest.TestCase):
+    """Regression: set_band()/set_spotter_tier() are called from the Tk UI
+    thread in main.py. _send_filter_setup() blocks ~0.3s per command (7+
+    commands); calling it inline froze the whole UI for ~2-4s per click,
+    which read as a crash. Both methods must return near-instantly,
+    dispatching the actual sends to a background thread instead."""
+
+    def test_set_band_returns_immediately(self):
+        conn = ClusterConnection(
+            "ve7cc.net", 23, "N6YU", queue.Queue(), selected_band="20m"
+        )
+        start = time.monotonic()
+        conn.set_band("40m")
+        elapsed = time.monotonic() - start
+        self.assertLess(elapsed, 0.5)
+
+    def test_set_spotter_tier_returns_immediately(self):
+        conn = ClusterConnection(
+            "ve7cc.net", 23, "N6YU", queue.Queue(), selected_tier="local"
+        )
+        start = time.monotonic()
+        conn.set_spotter_tier("regional")
+        elapsed = time.monotonic() - start
+        self.assertLess(elapsed, 0.5)
 
 
 if __name__ == "__main__":
