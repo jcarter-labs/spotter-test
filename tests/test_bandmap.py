@@ -176,6 +176,17 @@ class TestBandMapStorage(unittest.TestCase):
         self.assertEqual(bandmap.count_by_feed(), {"DXCLUSTER": 1})  # only 1 shown
         bandmap.destroy()
 
+    def test_ax2_stays_in_sync_with_ax_after_window_change(self):
+        # Regression: ax2.set_yticks(ax.get_yticks()) auto-expands ax2's
+        # view to fit every tick value, including the locator's out-of-
+        # range padding candidates (e.g. a 14025-14075 view's ticks include
+        # 14020 and 14080) - silently overriding ax2's set_ylim(). ax2 must
+        # stay clamped to exactly the same range as ax.
+        bandmap = BandMap(self.root, center_khz=14025.0, bandwidth_khz=50.0, window_minutes=10)
+        bandmap.set_window(center_khz=14050.0, bandwidth_khz=50.0, window_minutes=10)
+        self.assertEqual(bandmap._ax.get_ylim(), bandmap._ax2.get_ylim())
+        bandmap.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()

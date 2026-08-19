@@ -238,6 +238,12 @@ class BandMap(tk.Frame):
         ax2.set_xticks([])
         ax2.set_yticks(ax.get_yticks())
         ax2.set_yticklabels([])
+        # set_yticks() above auto-expands the view to fit every tick value,
+        # including the locator's out-of-range padding candidates (e.g. ax's
+        # own ticks for a 14025-14075 view include 14020 and 14080) - which
+        # silently overrides the set_ylim() call above. Reassert it so ax2
+        # stays clamped to the same range as ax, not stretched to fit ticks.
+        ax2.set_ylim(lo, hi)
         for side in ("top", "left", "bottom"):
             ax2.spines[side].set_visible(False)
         ax2.spines["right"].set_visible(True)
