@@ -42,6 +42,33 @@ bypassing this app's own spotter-tier filtering (that logic has its own
 tests in `test_filters.py`/`test_cluster.py`) — if this one fails, the
 telnet connection or the cluster itself is the problem, not our filters.
 
+## Visual regression safety net
+
+`tests/test_visual_regression.py` has two checks, run as part of the
+normal suite above (not opt-in, no network):
+
+- `TestAxisTickAlignment` — a precise, portable check via matplotlib's own
+  transform pipeline (no image involved) that the left axis (`ax`) and
+  mirrored right axis (`ax2`) land on the same pixel row for every tick,
+  across several center/bandwidth combinations. This is the generalized
+  form of a real bug this project hit: `ax2`'s view silently drifting
+  from `ax` after a frequency change, first caught by eye as visibly
+  misaligned ticks (see `masterplan-short.md`).
+- `TestGoldenImage` — a full-scene snapshot compared against
+  `tests/golden/bandmap_baseline.png`, for catching broader *unintended*
+  rendering drift (layout shifts, spacing, color) as the UI changes.
+
+When you make an **intentional** UI change and this test fails, don't
+treat that as a bug - regenerate the baseline, review it, commit it:
+
+```
+UPDATE_GOLDEN=1 py -m unittest tests.test_visual_regression -v
+```
+
+Then open `tests/golden/bandmap_baseline.png` and actually look at it
+before committing - this workflow only stays useful if someone looks at
+the image every time it changes, not just re-runs the command.
+
 ## Process cleanup on Windows
 
 `kill` from the Bash tool does not reliably map to the real Windows PID
